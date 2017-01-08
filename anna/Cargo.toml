@@ -5,5 +5,6 @@ authors = ["maciejkula <maciej.kula@gmail.com>"]
 
 [dependencies]
 rand = "0.3.15"
+rayon = "0.6.0"
 ndarray = "0.7.2"
 ndarray-rand = "0.3.1"

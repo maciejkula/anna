@@ -1,13 +1,14 @@
 mod errors;
 mod trees;
 
-extern crate rand;
-
-#[macro_use(s)]
 extern crate ndarray;
 extern crate ndarray_rand;
+extern crate rand;
+extern crate rayon;
 
 use ndarray::{ArrayView2, ArrayView1};
+
+use rayon::prelude::*;
 
 pub use errors::{Error, ErrorType, Result};
 use trees::Tree;
@@ -16,6 +17,7 @@ use trees::Tree;
 pub struct Hyperparameters {
     max_leaf_size: usize,
     num_trees: usize,
+    parallel: bool,
 }
 
 
@@ -24,16 +26,25 @@ impl Hyperparameters {
         Hyperparameters {
             max_leaf_size: 10,
             num_trees: 10,
+            parallel: false,
         }
     }
 
     pub fn max_leaf_size(&mut self, max_leaf_size: usize) -> &mut Hyperparameters {
+        assert!(max_leaf_size > 0,
+                "Max leaf size must be greater than zero.");
         self.max_leaf_size = max_leaf_size;
         self
     }
 
     pub fn num_trees(&mut self, num_trees: usize) -> &mut Hyperparameters {
+        assert!(num_trees > 0, "Number of trees must be greater than zero.");
         self.num_trees = num_trees;
+        self
+    }
+
+    pub fn parallel(&mut self) -> &mut Hyperparameters {
+        self.parallel = true;
         self
     }
 
@@ -47,22 +58,25 @@ impl Hyperparameters {
             return Err(Error::new(ErrorType::ZeroNorm));
         }
 
-        let mut raproxy = RandomProjectionForest {
+        let trees = if self.parallel {
+            (0..self.num_trees)
+                .into_par_iter()
+                .map(|_| Tree::new(self.max_leaf_size, data))
+                .collect::<Vec<_>>()
+        } else {
+            (0..self.num_trees)
+                .map(|_| Tree::new(self.max_leaf_size, data))
+                .collect::<Vec<_>>()
+        };
+
+        let model = RandomProjectionForest {
             max_leaf_size: self.max_leaf_size,
             num_trees: self.num_trees,
             dim: data.cols(),
-            trees: Vec::new(),
+            trees: trees,
         };
 
-        let mut trees = Vec::with_capacity(self.num_trees);
-
-        for _ in 0..self.num_trees {
-            trees.push(Tree::new(self.max_leaf_size, data));
-        }
-
-        raproxy.trees = trees;
-
-        Ok(raproxy)
+        Ok(model)
     }
 
     fn has_finite_entries(data: ArrayView2<f32>) -> bool {
@@ -169,11 +183,22 @@ mod tests {
     #[test]
     fn self_returned_from_query() {
 
-        let data = Array::random((1000, 10), F32(Normal::new(0.0, 1.0)));
-        let model = Hyperparameters::new().fit(data.view()).unwrap();
+        let max_leaf_size = 10;
+        let num_trees = 5;
+
+        let data = Array::random((3000, 10), F32(Normal::new(0.0, 1.0)));
+
+        let model = Hyperparameters::new()
+            .max_leaf_size(max_leaf_size)
+            .num_trees(num_trees)
+            .parallel()
+            .fit(data.view())
+            .unwrap();
 
         for idx in 0..data.rows() {
-            assert!(model.query(data.row(idx)).unwrap().contains(&idx))
+            let results = model.query(data.row(idx)).unwrap();
+            assert!(results.len() < max_leaf_size * num_trees);
+            assert!(results.contains(&idx));
         }
     }
 }
