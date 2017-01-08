@@ -7,11 +7,18 @@ use std::fmt;
 pub enum ErrorType {
     NonFiniteEntry,
     ZeroNorm,
+    IncompatibleDimensions(String),
 }
 
 #[derive(Debug)]
 pub struct Error {
     pub error_type: ErrorType,
+}
+
+impl Error {
+    pub fn new(error_type: ErrorType) -> Error {
+        Error { error_type: error_type }
+    }
 }
 
 impl fmt::Display for Error {
@@ -25,6 +32,7 @@ impl error::Error for Error {
         match self.error_type {
             ErrorType::ZeroNorm => "Zero-length vectors present in input data.",
             ErrorType::NonFiniteEntry => "Infinite or NaN values present in input data.",
+            ErrorType::IncompatibleDimensions(ref message) => message,
         }
     }
 }

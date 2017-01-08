@@ -7,10 +7,7 @@ extern crate rand;
 extern crate ndarray;
 extern crate ndarray_rand;
 
-use ndarray::{Array, Array1, Array2, ArrayView2, ArrayView1};
-
-use rand::Rng;
-use rand::distributions::{IndependentSample, Normal};
+use ndarray::{ArrayView2, ArrayView1};
 
 pub use errors::{Error, ErrorType, Result};
 use trees::Tree;
@@ -43,11 +40,11 @@ impl Hyperparameters {
     pub fn fit(&self, data: ArrayView2<f32>) -> Result<RandomProjectionForest> {
 
         if !Self::has_finite_entries(data) {
-            return Err(Error { error_type: ErrorType::NonFiniteEntry });
+            return Err(Error::new(ErrorType::NonFiniteEntry));
         }
 
         if !Self::has_valid_norms(data) {
-            return Err(Error { error_type: ErrorType::ZeroNorm });
+            return Err(Error::new(ErrorType::ZeroNorm));
         }
 
         let mut raproxy = RandomProjectionForest {
@@ -98,7 +95,16 @@ pub struct RandomProjectionForest {
 
 
 impl RandomProjectionForest {
-    pub fn query(&self, query_vector: ArrayView1<f32>) -> Vec<usize> {
+    pub fn query(&self, query_vector: ArrayView1<f32>) -> Result<Vec<usize>> {
+
+        if query_vector.len() != self.dim {
+            return Err(Error::new(ErrorType::IncompatibleDimensions(format!("Incompatible \
+                                                                             dimensions: \
+                                                                             expected {} but \
+                                                                             got {}",
+                                                                            self.dim,
+                                                                            query_vector.len()))));
+        }
 
         let query_norm = query_vector.dot(&query_vector).sqrt();
         let mut merged_vector = Vec::with_capacity(self.max_leaf_size * self.num_trees);
@@ -112,7 +118,7 @@ impl RandomProjectionForest {
         merged_vector.sort();
         merged_vector.dedup();
 
-        merged_vector
+        Ok(merged_vector)
     }
 }
 
@@ -142,20 +148,20 @@ mod tests {
     fn generate_input() {
 
         let data = Array::random((100, 10), F32(Normal::new(0.0, 1.0)));
-        let model = Hyperparameters::new().fit(data.view());
+        let _ = Hyperparameters::new().fit(data.view());
     }
 
     #[test]
     fn no_overflow_on_bad_splits() {
         let data = Array::zeros((100, 10)) + 1.0;
-        let model = Hyperparameters::new().fit(data.view());
+        let _ = Hyperparameters::new().fit(data.view());
     }
 
     #[test]
     fn throw_error_on_zero_vectors() {
         let data = Array::zeros((100, 10));
         match Hyperparameters::new().fit(data.view()) {
-            Ok(model) => panic!("Should have errored out."),
+            Ok(_) => panic!("Should have errored out."),
             Err(error) => assert!(error.error_type == ErrorType::ZeroNorm),
         }
     }
@@ -167,7 +173,7 @@ mod tests {
         let model = Hyperparameters::new().fit(data.view()).unwrap();
 
         for idx in 0..data.rows() {
-            assert!(model.query(data.row(idx)).contains(&idx))
+            assert!(model.query(data.row(idx)).unwrap().contains(&idx))
         }
     }
 }

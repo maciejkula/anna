@@ -2,7 +2,7 @@ use rand;
 use rand::Rng;
 use rand::distributions::{IndependentSample, Normal};
 
-use ndarray::{Array, Array1, Array2, ArrayView2, ArrayView1};
+use ndarray::{ArrayView2, ArrayView1};
 
 
 #[derive(Debug)]
