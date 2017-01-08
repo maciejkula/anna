@@ -40,7 +40,7 @@ impl Hyperparameters {
         self
     }
 
-    pub fn fit(&self, data: ArrayView2<f32>) -> Result<Raproxy> {
+    pub fn fit(&self, data: ArrayView2<f32>) -> Result<RandomProjectionForest> {
 
         if !Self::has_finite_entries(data) {
             return Err(Error { error_type: ErrorType::NonFiniteEntry });
@@ -50,7 +50,7 @@ impl Hyperparameters {
             return Err(Error { error_type: ErrorType::ZeroNorm });
         }
 
-        let mut raproxy = Raproxy {
+        let mut raproxy = RandomProjectionForest {
             max_leaf_size: self.max_leaf_size,
             num_trees: self.num_trees,
             dim: data.cols(),
@@ -89,7 +89,7 @@ impl Hyperparameters {
     }
 }
 
-pub struct Raproxy {
+pub struct RandomProjectionForest {
     max_leaf_size: usize,
     num_trees: usize,
     dim: usize,
@@ -97,7 +97,7 @@ pub struct Raproxy {
 }
 
 
-impl Raproxy {
+impl RandomProjectionForest {
     pub fn query(&self, query_vector: ArrayView1<f32>) -> Vec<usize> {
 
         let query_norm = query_vector.dot(&query_vector).sqrt();
@@ -142,13 +142,13 @@ mod tests {
     fn generate_input() {
 
         let data = Array::random((100, 10), F32(Normal::new(0.0, 1.0)));
-        let proxy = Hyperparameters::new().fit(data.view());
+        let model = Hyperparameters::new().fit(data.view());
     }
 
     #[test]
     fn no_overflow_on_bad_splits() {
         let data = Array::zeros((100, 10)) + 1.0;
-        let proxy = Hyperparameters::new().fit(data.view());
+        let model = Hyperparameters::new().fit(data.view());
     }
 
     #[test]
