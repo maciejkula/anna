@@ -6,12 +6,12 @@ use std::fmt;
 #[derive(PartialEq)]
 pub enum ErrorType {
     NonFiniteEntry,
-    ZeroNorm
+    ZeroNorm,
 }
 
 #[derive(Debug)]
 pub struct Error {
-    pub error_type: ErrorType
+    pub error_type: ErrorType,
 }
 
 impl fmt::Display for Error {
@@ -24,7 +24,7 @@ impl error::Error for Error {
     fn description(&self) -> &str {
         match self.error_type {
             ErrorType::ZeroNorm => "Zero-length vectors present in input data.",
-            ErrorType::NonFiniteEntry => "Infinite or NaN values present in input data."
+            ErrorType::NonFiniteEntry => "Infinite or NaN values present in input data.",
         }
     }
 }

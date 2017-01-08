@@ -21,7 +21,7 @@ struct Leaf {
 enum Node {
     Split(Split),
     Leaf(Leaf),
-    Empty
+    Empty,
 }
 
 struct Hyperplanes {
@@ -89,7 +89,7 @@ impl Hyperplanes {
 pub struct Tree {
     max_leaf_size: usize,
     hyperplanes: Hyperplanes,
-    root: Node
+    root: Node,
 }
 
 
@@ -98,33 +98,55 @@ impl Tree {
         let mut tree = Tree {
             max_leaf_size: max_leaf_size,
             hyperplanes: Hyperplanes::new(data.cols()),
-            root: Node::Empty
+            root: Node::Empty,
         };
 
         let indices = (0..data.rows()).collect::<Vec<usize>>();
         let norms = data.inner_iter().map(|row| row.dot(&row).sqrt()).collect::<Vec<f32>>();
 
-        tree.root = tree.fit_tree(indices,
-                                  data,
-                                  &norms,
-                                  0);
-        
-        println!("{:#?}", tree.root);
+        tree.root = tree.fit_tree(indices, data, &norms, 0);
+
         tree
+    }
+
+    pub fn query(&self, datum: ArrayView1<f32>, norm: f32) -> &[usize] {
+        self.query_node(&self.root, datum, norm)
+    }
+
+    fn query_node<'a>(&'a self, node: &'a Node, datum: ArrayView1<f32>, norm: f32) -> &'a [usize] {
+        match node {
+            &Node::Split(ref node) => {
+                let plane = self.hyperplanes
+                    .get(node.plane_idx)
+                    .expect("Unable to find hyperplane of fitted tree");
+                let cosine = plane.dot(&datum) / norm;
+
+                let (ref left, ref right) = node.children;
+
+                let next_node = if cosine <= node.intercept {
+                    left
+                } else {
+                    right
+                };
+
+                self.query_node(&next_node, datum, norm)
+            }
+            &Node::Leaf(ref node) => &node.point_ids,
+            &Node::Empty => panic!("Tree not fitted."),
+        }
     }
 
     fn fit_tree(&mut self,
                 indices: Vec<usize>,
                 data: ArrayView2<f32>,
                 norms: &[f32],
-                depth: usize) -> Node {
-
-        println!("fitting at depth {}", depth);
+                depth: usize)
+                -> Node {
 
         if indices.len() <= self.max_leaf_size {
-            return Node::Leaf(Leaf { point_ids: indices })
+            return Node::Leaf(Leaf { point_ids: indices });
         }
-        
+
         let mut random_state = rand::thread_rng();
 
         let point_distances = {
@@ -164,7 +186,7 @@ impl Tree {
                 plane_idx: depth,
                 intercept: intercept,
                 children: (Box::new(self.fit_tree(left_indices, data, norms, depth + 1)),
-                           Box::new(self.fit_tree(right_indices, data, norms, depth + 1)))
+                           Box::new(self.fit_tree(right_indices, data, norms, depth + 1))),
             })
         }
     }

@@ -50,19 +50,20 @@ impl Hyperparameters {
             return Err(Error { error_type: ErrorType::ZeroNorm });
         }
 
-        let raproxy = Raproxy {
+        let mut raproxy = Raproxy {
             max_leaf_size: self.max_leaf_size,
             num_trees: self.num_trees,
             dim: data.cols(),
-            trees: Vec::new()
+            trees: Vec::new(),
         };
 
         let mut trees = Vec::with_capacity(self.num_trees);
 
         for _ in 0..self.num_trees {
-            trees.push(Tree::new(self.max_leaf_size,
-                                 data));
+            trees.push(Tree::new(self.max_leaf_size, data));
         }
+
+        raproxy.trees = trees;
 
         Ok(raproxy)
     }
@@ -70,7 +71,7 @@ impl Hyperparameters {
     fn has_finite_entries(data: ArrayView2<f32>) -> bool {
         for elem in data.iter() {
             if !elem.is_finite() {
-                return false
+                return false;
             }
         }
 
@@ -80,7 +81,7 @@ impl Hyperparameters {
     fn has_valid_norms(data: ArrayView2<f32>) -> bool {
         for row in data.inner_iter() {
             if !row.dot(&row).is_normal() {
-                return false
+                return false;
             }
         }
 
@@ -93,6 +94,26 @@ pub struct Raproxy {
     num_trees: usize,
     dim: usize,
     trees: Vec<Tree>,
+}
+
+
+impl Raproxy {
+    pub fn query(&self, query_vector: ArrayView1<f32>) -> Vec<usize> {
+
+        let query_norm = query_vector.dot(&query_vector).sqrt();
+        let mut merged_vector = Vec::with_capacity(self.max_leaf_size * self.num_trees);
+
+        for subresult in self.trees
+            .iter()
+            .map(|tree| tree.query(query_vector, query_norm)) {
+            merged_vector.extend_from_slice(subresult);
+        }
+
+        merged_vector.sort();
+        merged_vector.dedup();
+
+        merged_vector
+    }
 }
 
 
@@ -136,6 +157,17 @@ mod tests {
         match Hyperparameters::new().fit(data.view()) {
             Ok(model) => panic!("Should have errored out."),
             Err(error) => assert!(error.error_type == ErrorType::ZeroNorm),
+        }
+    }
+
+    #[test]
+    fn self_returned_from_query() {
+
+        let data = Array::random((1000, 10), F32(Normal::new(0.0, 1.0)));
+        let model = Hyperparameters::new().fit(data.view()).unwrap();
+
+        for idx in 0..data.rows() {
+            assert!(model.query(data.row(idx)).contains(&idx))
         }
     }
 }
