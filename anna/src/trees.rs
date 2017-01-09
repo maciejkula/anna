@@ -160,8 +160,9 @@ impl Tree {
                 .map(|&idx| (idx, data.row(idx).dot(&hyperplane) / norms[idx]))
                 .collect::<Vec<_>>();
 
-            distances.sort_by(|a, b| {
-                a.partial_cmp(b).expect("NaN values encountered when creating tree splits")
+            distances.sort_by(|&(_, a_dist), &(_, b_dist)| {
+                a_dist.partial_cmp(&b_dist)
+                    .expect("NaN values encountered when creating tree splits")
             });
 
             distances

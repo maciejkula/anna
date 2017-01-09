@@ -1,6 +1,7 @@
 mod errors;
 mod trees;
 
+extern crate itertools;
 extern crate ndarray;
 extern crate ndarray_rand;
 extern crate rand;
@@ -72,7 +73,8 @@ impl Hyperparameters {
         let model = RandomProjectionForest {
             max_leaf_size: self.max_leaf_size,
             num_trees: self.num_trees,
-            dim: data.cols(),
+            rows: data.rows(),
+            cols: data.cols(),
             trees: trees,
         };
 
@@ -103,20 +105,21 @@ impl Hyperparameters {
 pub struct RandomProjectionForest {
     max_leaf_size: usize,
     num_trees: usize,
-    dim: usize,
+    rows: usize,
+    cols: usize,
     trees: Vec<Tree>,
 }
 
 
 impl RandomProjectionForest {
-    pub fn query(&self, query_vector: ArrayView1<f32>) -> Result<Vec<usize>> {
+    pub fn query_unsorted(&self, query_vector: ArrayView1<f32>) -> Result<Vec<usize>> {
 
-        if query_vector.len() != self.dim {
+        if query_vector.len() != self.cols {
             return Err(Error::new(ErrorType::IncompatibleDimensions(format!("Incompatible \
-                                                                             dimensions: \
-                                                                             expected {} but \
-                                                                             got {}",
-                                                                            self.dim,
+                                                                             number of \
+                                                                             columns: expected \
+                                                                             {} but got {}",
+                                                                            self.cols,
                                                                             query_vector.len()))));
         }
 
@@ -134,6 +137,43 @@ impl RandomProjectionForest {
 
         Ok(merged_vector)
     }
+
+    pub fn query(&self,
+                 query_vector: ArrayView1<f32>,
+                 data: ArrayView2<f32>)
+                 -> Result<Vec<(usize, f32)>> {
+
+        if data.rows() != self.rows {
+            let message = format!("Number of indexed points not equal to number of rows in \
+                                   supplied data: expected {} but got {}",
+                                  self.rows,
+                                  data.rows());
+            return Err(Error::new(ErrorType::IncompatibleDimensions(message)));
+        }
+
+        let candidates = self.query_unsorted(query_vector)?;
+
+        let mut distances = Vec::with_capacity(candidates.len());
+
+        for idx in candidates.into_iter() {
+            let row = data.row(idx);
+            let norm = row.dot(&row).sqrt();
+            let cosine = query_vector.dot(&row) / norm;
+
+            if !cosine.is_finite() {
+                return Err(Error::new(ErrorType::NonFiniteEntry));
+            }
+
+            distances.push((idx, cosine));
+        }
+
+        // Reversed.
+        distances.sort_by(|&(_, a_dist), &(_, b_dist)| {
+            b_dist.partial_cmp(&a_dist).expect("NaN values encountered when creating tree splits")
+        });
+
+        Ok(distances)
+    }
 }
 
 
@@ -145,21 +185,40 @@ mod tests {
     use ndarray::Array;
     use ndarray_rand::{RandomExt, F32};
 
+    use itertools::multizip;
+
     use super::*;
 
-    #[test]
-    fn it_works() {
+    fn nearest_neighbours(data: ArrayView2<f32>, query: ArrayView1<f32>, num: usize) -> Vec<usize> {
 
-        let arr = Array::zeros((5, 2));
-        let first_row = arr.row(0);
+        let query_norm = query.dot(&query).sqrt();
+        let norms = data.inner_iter().map(|row| row.dot(&row).sqrt()).collect::<Vec<f32>>();
 
-        let products = arr.inner_iter().map(|row| row.dot(&first_row)).collect::<Vec<f32>>();
+        let mut distances = multizip((0..data.rows(), data.inner_iter(), norms.iter()))
+            .map(|(idx, row, row_norm)| (idx, row.dot(&query) / row_norm / query_norm))
+            .collect::<Vec<_>>();
 
-        println!("{:#?}", products);
+        // Reversed.
+        distances.sort_by(|&(_, a_dist), &(_, b_dist)| {
+            b_dist.partial_cmp(&a_dist).expect("NaN values encountered when creating tree splits")
+        });
+
+        distances[..num].iter().map(|&(idx, _)| idx).collect::<Vec<_>>()
+    }
+
+    fn precision_score(true_neighbours: &[usize], approximate: &[(usize, f32)]) -> f32 {
+
+        approximate.iter()
+            .map(|&(idx, _)| if true_neighbours.contains(&idx) {
+                1.0
+            } else {
+                0.0
+            })
+            .sum::<f32>() / true_neighbours.len() as f32
     }
 
     #[test]
-    fn generate_input() {
+    fn basic_fitting() {
 
         let data = Array::random((100, 10), F32(Normal::new(0.0, 1.0)));
         let _ = Hyperparameters::new().fit(data.view());
@@ -196,9 +255,39 @@ mod tests {
             .unwrap();
 
         for idx in 0..data.rows() {
-            let results = model.query(data.row(idx)).unwrap();
+            let results = model.query_unsorted(data.row(idx)).unwrap();
             assert!(results.len() < max_leaf_size * num_trees);
             assert!(results.contains(&idx));
         }
+    }
+
+    #[test]
+    fn precision() {
+
+        let max_leaf_size = 10;
+        let num_trees = 10;
+        let precision_k = 10;
+        let num_queries = 30;
+
+        let data = Array::random((3000, 10), F32(Normal::new(0.0, 1.0)));
+
+        let model = Hyperparameters::new()
+            .max_leaf_size(max_leaf_size)
+            .num_trees(num_trees)
+            .parallel()
+            .fit(data.view())
+            .unwrap();
+
+        let avg_precision = (0..num_queries)
+            .map(|idx| {
+                let approximate_results = &model.query(data.row(idx), data.view())
+                    .unwrap()[..precision_k];
+                let true_results = nearest_neighbours(data.view(), data.row(idx), precision_k);
+
+                precision_score(&true_results, approximate_results)
+            })
+            .sum::<f32>() / num_queries as f32;
+
+        println!("{}", avg_precision);
     }
 }

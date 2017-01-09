@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["maciejkula <maciej.kula@gmail.com>"]
 
 [dependencies]
+itertools = "0.5.8"
 rand = "0.3.15"
 rayon = "0.6.0"
 ndarray = "0.7.2"
